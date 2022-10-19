@@ -1,4 +1,5 @@
-seqan3
-zlib
 build
 .vscode
+
+seqan3
+zlib
