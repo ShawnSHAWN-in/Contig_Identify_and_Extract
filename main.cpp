@@ -98,13 +98,13 @@ int main(int argc, char ** argv)
 //    }
 //    std::cout<<"Thanks";
 
-    using seq_na_t=std::pair<std::string,seqan3::dna15_vector>;
-    using seq_aa_t=std::pair<std::string,seqan3::aa27_vector>;
-    using seq_na_set_t=std::vector<seq_na_t>;
-    using seq_aa_set_t=std::vector<seq_aa_t>;
 
-    seq_na_set_t seq_na_set;
-    seq_aa_set_t seq_aa_set;
+
+    using types_nt = seqan3::type_list< std::string,std::vector<seqan3::dna15>>;
+    using fields_nt = seqan3::fields<seqan3::field::id,seqan3::field::seq>;
+    using sequence_nt_record_type = seqan3::sequence_record<types_nt, fields_nt>;
+    using seq_nt_set_t=std::vector<sequence_nt_record_type>;
+    seq_nt_set_t seq_nt_set;
 
     Kseq_Cpp file_input(std::string{"My_fasta.fasta"},16384);
     while (file_input.get_seq())
@@ -115,48 +115,18 @@ int main(int argc, char ** argv)
         std::string tmp_string2=std::regex_replace(tmp_string1.c_str(),tmp_reg2,"N");
         //std::cout<<tmp_string2<<"\n";
         //用于输出比对上的氨基酸序列
-        seq_na_set.push_back(
-            std::make_pair(
+        sequence_nt_record_type record{
                 std::string(file_input.seq->name.s),
-                make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15>)
-            )
-        );
-        //正向错位翻译
-        seq_aa_set.push_back(
-            std::make_pair(std::string(file_input.seq->name.s),
-            make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15>| seqan3::views::translate_single(seqan3::translation_frames::forward_frame0))
-            )
-        );
-        seq_aa_set.push_back(
-            std::make_pair(std::string(file_input.seq->name.s),
-            make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15>| seqan3::views::translate_single(seqan3::translation_frames::forward_frame1))
-            )
-        );
-        seq_aa_set.push_back(
-            std::make_pair(std::string(file_input.seq->name.s),
-            make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15>| seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
-            )
-        );
-        //反向互补错位翻译
-        seq_aa_set.push_back(
-            std::make_pair(std::string(file_input.seq->name.s),
-            make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15>| seqan3::views::complement | std::views::reverse| seqan3::views::translate_single(seqan3::translation_frames::forward_frame0))
-            )
-        );       
-        seq_aa_set.push_back(
-            std::make_pair(std::string(file_input.seq->name.s),
-            make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15>| seqan3::views::complement |std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame1))
-            )
-        );    
-        seq_aa_set.push_back(
-            std::make_pair(std::string(file_input.seq->name.s),
-            make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15>| seqan3::views::complement |std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
-            )
-        );             
-     
+                make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15> )
+                };
+        seq_nt_set.push_back(record);
     }
-    //seqan3::debug_stream<< seq_aa_set[0]<<"\n";
-    
+
+
+    using types_aa = seqan3::type_list< std::string,std::vector<seqan3::aa27>>;
+    using fields_aa = seqan3::fields<seqan3::field::id,seqan3::field::seq>;
+    using sequence_aa_record_type = seqan3::sequence_record<types_aa, fields_aa>;
+    using seq_aa_set_t=std::vector<sequence_aa_record_type>;
     Kseq_Cpp file_conserved(std::string{"cd21530.FASTA"},16384);
     seq_aa_set_t cd_aa_set;
     while (file_conserved.get_seq())
@@ -167,23 +137,13 @@ int main(int argc, char ** argv)
         std::string tmp_string1=std::regex_replace(file_conserved.seq->seq.s,tmp_reg1,"");
         std::string tmp_string2=std::regex_replace(tmp_string1.c_str(),tmp_reg2,"X");
         //std::cout<<tmp_string2<<"\n";
-        cd_aa_set.push_back(
-            std::make_pair(
+        sequence_aa_record_type record{
                 std::string(file_input.seq->name.s),
                 make_vector(tmp_string2|seqan3::views::char_to<seqan3::aa27>)
-                )
-        );
+                };
+        cd_aa_set.push_back(record);
     }
 
-    //输出结果文件中
-    auto fasta_file = std::filesystem::current_path() / "result.fasta";
-    //seqan3::sequence_file_output fout{std::cout,seqan3::format_fasta{}};
-    seqan3::sequence_file_output fout{fasta_file,seqan3::fields<seqan3::field::seq, seqan3::field::id>{}};
-    using types = seqan3::type_list<std::vector<seqan3::aa27>, std::string>;
-    using fields = seqan3::fields<seqan3::field::seq, seqan3::field::id>;
-    using sequence_record_type = seqan3::sequence_record<types, fields>;
-
-    //seqan3::debug_stream<< cd_aa_set[0]<<"\n";
     auto output_config = 
         seqan3::align_cfg::output_score{} | 
         seqan3::align_cfg::output_begin_position{}|
@@ -191,70 +151,77 @@ int main(int argc, char ** argv)
         seqan3::align_cfg::output_alignment{};
 
     auto config =
-        seqan3::align_cfg::method_global{seqan3::align_cfg::free_end_gaps_sequence1_leading{true},
-                                         seqan3::align_cfg::free_end_gaps_sequence2_leading{true},
+        seqan3::align_cfg::method_global{seqan3::align_cfg::free_end_gaps_sequence1_leading{true},//long local
+                                         seqan3::align_cfg::free_end_gaps_sequence2_leading{false},//short global
                                          seqan3::align_cfg::free_end_gaps_sequence1_trailing{true},
-                                         seqan3::align_cfg::free_end_gaps_sequence2_trailing{true}}
+                                         seqan3::align_cfg::free_end_gaps_sequence2_trailing{false}}
         | seqan3::align_cfg::scoring_scheme{seqan3::aminoacid_scoring_scheme{seqan3::aminoacid_similarity_matrix::blosum62}}
         | seqan3::align_cfg::gap_cost_affine{seqan3::align_cfg::open_score{-11}, seqan3::align_cfg::extension_score{-1}}
         | seqan3::align_cfg::parallel{15}
         | output_config;
 
-    using score_t=std::vector<double>;//Alignment Score divide aligned sequence leng
-    using sequence_pair_1_t=seqan3::aa27_vector;
-    using sequence_pair_2_t=seqan3::aa27_vector;
-    using name_pair_1_t = std::string;
-    using name_pair_2_t = std::string;
-    using sequence_pair_t = std::pair<sequence_pair_1_t, sequence_pair_2_t>;
-    using name_pair_t = std::pair<name_pair_1_t,name_pair_2_t>;
+    auto fasta_file = std::filesystem::current_path() / "result.fasta";
+    //seqan3::sequence_file_output fout{std::cout,seqan3::format_fasta{}};
+    seqan3::sequence_file_output fout{fasta_file,seqan3::fields< seqan3::field::id,seqan3::field::seq>{}};
+    
+    for(size_t i = 0 ; i < seq_nt_set.size(); i++){
+        seq_aa_set_t tmp_translation(6);
+        tmp_translation[0]=sequence_aa_record_type{
+                seq_nt_set[i].id(),
+                make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame0))
+                };
+        tmp_translation[1]=sequence_aa_record_type{
+                seq_nt_set[i].id(),
+                make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame1))
+                };                
+        tmp_translation[2]=sequence_aa_record_type{
+                seq_nt_set[i].id(),
+                make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
+                };
+        tmp_translation[3]=sequence_aa_record_type{
+                seq_nt_set[i].id(),
+                make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame0))
+                };
+        tmp_translation[4]=sequence_aa_record_type{
+                seq_nt_set[i].id(),
+                make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame1))
+                };
+        tmp_translation[5]=sequence_aa_record_type{
+                seq_nt_set[i].id(),
+                make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
+                };
 
-    using sequences_t=std::pair<std::vector<name_pair_t>,std::vector<sequence_pair_t>>;
-
-    std::cout<<"cd_aa_set:"<<cd_aa_set.size()<<"\n";
-    std::cout<<"seq_aa_set:"<<seq_aa_set.size()<<"\n";
-
-    for(size_t i = 0 ; i < seq_aa_set.size(); i++){
-        sequences_t tmp_sequence{
-            (cd_aa_set.size()),
-            (cd_aa_set.size())
-        };
-        score_t tmp_score;
-
-        //准备多序列比对需要的核心
-        for(size_t n = 0 ; n< cd_aa_set.size() ; n++ ){
-            std::cout<<"Cycle:"<<i<<"\t"<<"Colomn:"<<n<<"\n";
-            tmp_sequence.first[n]={
-                std::ref(cd_aa_set[n].first),
-                std::ref(seq_aa_set[i].first)
-            };
-            tmp_sequence.second[n]={
-                std::ref(cd_aa_set[n].second),
-                std::ref(seq_aa_set[i].second)
-            };        
-        };
-
+        std::vector<double> tmp_score;
         std::vector<std::pair<int,int>> tmp_positions;
-        for (auto const & res : seqan3::align_pairwise(tmp_sequence.second, config))
+        std::vector<std::pair<seqan3::aa27_vector, seqan3::aa27_vector>> tmp_sequence;
+        for (auto &tmp_1 : tmp_translation)
         {
-            std::cout<<std::get<1>(res.alignment()).size()<<"\n";
+
+            for (auto &tmp_2 : cd_aa_set)
+            {
+                tmp_sequence.push_back(
+                    std::make_pair(
+                        tmp_1.sequence(),//Out_put sequence,first
+                        tmp_2.sequence()));//Conserved aa sequence,second
+            }
+        }
+        for (auto const &res : seqan3::align_pairwise(tmp_sequence, config))
+        {
             tmp_score.push_back((double)res.score()/(double)std::get<1>(res.alignment()).size());
-            tmp_positions.push_back(std::make_pair(res.sequence2_begin_position(),res.sequence2_end_position()));
+            tmp_positions.push_back(std::make_pair(res.sequence1_begin_position(),res.sequence1_end_position()));
         }
         auto maxPosition=std::max_element(tmp_score.begin(),tmp_score.end());
-        if(*maxPosition > 3){
+        if(*maxPosition > 0){
             auto index =std::distance(tmp_score.begin(),maxPosition);
-            std::cout<<*maxPosition<<"\n";
-            std::cout<<((tmp_sequence.first)[index]).second<<"\n";
-            auto tmp_seq=((tmp_sequence.second)[index]).second;
-            auto beg=tmp_seq.begin()+tmp_positions[index].first;
-            auto end=tmp_seq.begin()+tmp_positions[index].second;
-            seqan3::debug_stream<<std::vector(beg,end)<<"\n";
-            sequence_record_type record{
-                std::vector(beg,end),
-                ((tmp_sequence.first)[index]).second 
+            auto tmp_seq=tmp_sequence[index].first;
+            auto beg=tmp_seq.begin()+tmp_positions[index].first;//Begin position
+            auto end=tmp_seq.begin()+tmp_positions[index].second;//End position
+            //seqan3::debug_stream<<std::vector(beg,end)<<"\n";
+            sequence_aa_record_type record{
+                seq_nt_set[i].id(),
+                std::vector(beg,end)
                 };
             fout.push_back(record);
         }
     }
-
 }
