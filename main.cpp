@@ -6,6 +6,7 @@
 #include<thread>//获取最大线程数
 #include<algorithm>//获取最大值位置
 #include <filesystem> // use std::filesystem::path
+#include<cctype>
 #include <fstream>
 #include <numeric>
 #include <cstring>
@@ -52,7 +53,7 @@ void initialise_argument_parser(seqan3::argument_parser & parser, cmd_arguments 
                       seqan3::option_spec::required,seqan3::input_file_validator{{"fa","fas","fna","ffn","ffa","frn","fasta"}});
 
 
-    seqan3::regex_validator type_Validator{"(AA|NT|aa|nt|Aa|aA|Nt|nT)"};
+    seqan3::regex_validator type_Validator{"(AA|NT)"};
     parser.add_option(args.input_type,'t',"type_of_input_contig","Input sequence type [NT|AA] ",
                       seqan3::option_spec::required,type_Validator);
 
@@ -80,33 +81,30 @@ int main(int argc, char ** argv)
 {
     using namespace seqan3::literals;
 
-//    seqan3::argument_parser myparser{"IEContig", argc, argv}; // initialise myparser
-//
-//    //Self defined options or flags
-//    cmd_arguments args{};
-//
-//    // ... add information, options, flags and positional options
-//    initialise_argument_parser(myparser, args);
-//    try
-//    {
-//        myparser.parse(); // trigger command line parsing
-//    }
-//    catch (seqan3::argument_parser_error const & ext) // catch user errors
-//    {
-//        seqan3::debug_stream << "[Winter has come] " << ext.what() << "\n"; // customise your error message
-//        //return -1;
-//    }
-//    std::cout<<"Thanks";
+    seqan3::argument_parser myparser{"IEContig", argc, argv}; // initialise myparser
 
+    //Self defined options or flags
+    cmd_arguments args{};
 
-
+    // ... add information, options, flags and positional options
+    initialise_argument_parser(myparser, args);
+    try
+    {
+        myparser.parse(); // trigger command line parsing
+    }
+    catch (seqan3::argument_parser_error const & ext) // catch user errors
+    {
+        seqan3::debug_stream << "[Winter has come] " << ext.what() << "\n"; // customise your error message
+        //return -1;
+    }
+    
     using types_nt = seqan3::type_list< std::string,std::vector<seqan3::dna15>>;
     using fields_nt = seqan3::fields<seqan3::field::id,seqan3::field::seq>;
     using sequence_nt_record_type = seqan3::sequence_record<types_nt, fields_nt>;
     using seq_nt_set_t=std::vector<sequence_nt_record_type>;
     seq_nt_set_t seq_nt_set;
-
-    Kseq_Cpp file_input(std::string{"My_fasta.fasta"},16384);
+    //输入的Contig核苷酸序列
+    Kseq_Cpp file_input(args.file_nucleotide.generic_string(),16384);
     while (file_input.get_seq())
     {
         std::regex tmp_reg1("-");
@@ -127,7 +125,8 @@ int main(int argc, char ** argv)
     using fields_aa = seqan3::fields<seqan3::field::id,seqan3::field::seq>;
     using sequence_aa_record_type = seqan3::sequence_record<types_aa, fields_aa>;
     using seq_aa_set_t=std::vector<sequence_aa_record_type>;
-    Kseq_Cpp file_conserved(std::string{"cd21530.FASTA"},16384);
+    //Conserved AA file input
+    Kseq_Cpp file_conserved(args.file_amino.generic_string(),16384);
     seq_aa_set_t cd_aa_set;
     while (file_conserved.get_seq())
     {
@@ -162,7 +161,8 @@ int main(int argc, char ** argv)
 
     auto fasta_file = std::filesystem::current_path() / "result.fasta";
     //seqan3::sequence_file_output fout{std::cout,seqan3::format_fasta{}};
-    seqan3::sequence_file_output fout{fasta_file,seqan3::fields< seqan3::field::id,seqan3::field::seq>{}};
+    std::cout<<args.file_output.generic_string()<<"\n";
+    seqan3::sequence_file_output fout{args.file_output.generic_string(),seqan3::fields< seqan3::field::id,seqan3::field::seq>{}};
     
     for(size_t i = 0 ; i < seq_nt_set.size(); i++){
         seq_aa_set_t tmp_translation(6);
@@ -196,32 +196,60 @@ int main(int argc, char ** argv)
         std::vector<std::pair<seqan3::aa27_vector, seqan3::aa27_vector>> tmp_sequence;
         for (auto &tmp_1 : tmp_translation)
         {
-
             for (auto &tmp_2 : cd_aa_set)
             {
                 tmp_sequence.push_back(
                     std::make_pair(
                         tmp_1.sequence(),//Out_put sequence,first
-                        tmp_2.sequence()));//Conserved aa sequence,second
+                        tmp_2.sequence()));//Conserved aa sequence,second  
             }
         }
         for (auto const &res : seqan3::align_pairwise(tmp_sequence, config))
         {
             tmp_score.push_back((double)res.score()/(double)std::get<1>(res.alignment()).size());
             tmp_positions.push_back(std::make_pair(res.sequence1_begin_position(),res.sequence1_end_position()));
-        }
+        }  
         auto maxPosition=std::max_element(tmp_score.begin(),tmp_score.end());
-        if(*maxPosition > 0){
-            auto index =std::distance(tmp_score.begin(),maxPosition);
-            auto tmp_seq=tmp_sequence[index].first;
-            auto beg=tmp_seq.begin()+tmp_positions[index].first;//Begin position
-            auto end=tmp_seq.begin()+tmp_positions[index].second;//End position
-            //seqan3::debug_stream<<std::vector(beg,end)<<"\n";
-            sequence_aa_record_type record{
-                seq_nt_set[i].id(),
-                std::vector(beg,end)
-                };
-            fout.push_back(record);
+        //std::cout<<"Threshold:"<<args.self_set_threshold<<"\n";
+        //std::cout<<"Output_type:"<<args.output_type<<"\n";
+        //std::cout<<"MaxScore:"<<*maxPosition<<"\n";
+        if (*maxPosition > args.self_set_threshold)
+        {
+            std::cout<<"Scores:"<<*maxPosition<<"\n";
+            auto index = std::distance(tmp_score.begin(), maxPosition);
+            // seqan3::debug_stream<<std::vector(beg,end)<<"\n";
+            if (args.output_type=="AA")
+            {                
+                auto tmp_seq = tmp_sequence[index].first;
+                auto beg = tmp_seq.begin() + tmp_positions[index].first;  // Begin position
+                auto end = tmp_seq.begin() + tmp_positions[index].second; // End position
+                sequence_aa_record_type record{
+                    seq_nt_set[i].id(),
+                    std::vector(beg, end)};
+                fout.push_back(record);
+            }else if (args.output_type=="NT")
+            {
+                //核苷酸序列扣取范围
+                auto start_position=tmp_positions[index].first * 3 -2;  // Begin position
+                auto stop_position=tmp_positions[index].second*3; // End position
+                if (index/3==0)
+                {
+                    auto out_seq=make_vector(seq_nt_set[i].sequence()|std::views::drop(index%3));
+                    sequence_nt_record_type record{
+                        seq_nt_set[i].id(),
+                        std::vector(out_seq.begin()+start_position,out_seq.begin()+stop_position)
+                    };
+                    fout.push_back(record);                                            
+                }else if (index/3==1)
+                {
+                    auto out_seq=make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|std::views::drop(index%3));
+                    sequence_nt_record_type record{
+                        seq_nt_set[i].id(),
+                        std::vector(out_seq.begin()+start_position,out_seq.begin()+stop_position)
+                    };                      
+                    fout.push_back(record);               
+                }                
+            }
         }
     }
 }
