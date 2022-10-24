@@ -191,11 +191,14 @@ int main(int argc, char ** argv)
                 make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
                 };
 
-        std::vector<double> tmp_score;
-        std::vector<std::pair<int,int>> tmp_positions;
-        std::vector<std::pair<seqan3::aa27_vector, seqan3::aa27_vector>> tmp_sequence;
+        std::vector<double> score;
+        std::vector<std::pair<int,int>> positions;
+        std::vector<std::pair<seqan3::aa27_vector, seqan3::aa27_vector>> sequence;
         for (auto &tmp_1 : tmp_translation)
         {
+            std::vector<double> tmp_score;
+            std::vector<std::pair<int,int>> tmp_positions;
+            std::vector<std::pair<seqan3::aa27_vector, seqan3::aa27_vector>> tmp_sequence;
             for (auto &tmp_2 : cd_aa_set)
             {
                 tmp_sequence.push_back(
@@ -203,26 +206,32 @@ int main(int argc, char ** argv)
                         tmp_1.sequence(),//Out_put sequence,first
                         tmp_2.sequence()));//Conserved aa sequence,second  
             }
+            for (auto const &res : seqan3::align_pairwise(tmp_sequence, config))
+            {
+                tmp_score.push_back((double)res.score()/(double)std::get<1>(res.alignment()).size());
+                tmp_positions.push_back(std::make_pair(res.sequence1_begin_position(),res.sequence1_end_position()));
+            }
+            auto tmp_maxPosition=std::max_element(tmp_score.begin(),tmp_score.end());
+            auto tmp_index = std::distance(tmp_score.begin(), tmp_maxPosition);
+            score.push_back(tmp_score[tmp_index]);
+            positions.push_back(std::move(tmp_positions[tmp_index]));
+            sequence.push_back(std::move(tmp_sequence[tmp_index]));
         }
-        for (auto const &res : seqan3::align_pairwise(tmp_sequence, config))
-        {
-            tmp_score.push_back((double)res.score()/(double)std::get<1>(res.alignment()).size());
-            tmp_positions.push_back(std::make_pair(res.sequence1_begin_position(),res.sequence1_end_position()));
-        }  
-        auto maxPosition=std::max_element(tmp_score.begin(),tmp_score.end());
+        
+        auto maxPosition=std::max_element(score.begin(),score.end());
         //std::cout<<"Threshold:"<<args.self_set_threshold<<"\n";
         //std::cout<<"Output_type:"<<args.output_type<<"\n";
         //std::cout<<"MaxScore:"<<*maxPosition<<"\n";
         if (*maxPosition > args.self_set_threshold)
         {
             std::cout<<"Scores:"<<*maxPosition<<"\n";
-            auto index = std::distance(tmp_score.begin(), maxPosition);
+            auto index = std::distance(score.begin(), maxPosition);
             // seqan3::debug_stream<<std::vector(beg,end)<<"\n";
             if (args.output_type=="AA")
             {                
-                auto tmp_seq = tmp_sequence[index].first;
-                auto beg = tmp_seq.begin() + tmp_positions[index].first;  // Begin position
-                auto end = tmp_seq.begin() + tmp_positions[index].second; // End position
+                auto tmp_seq = sequence[index].first;
+                auto beg = tmp_seq.begin() + positions[index].first;  // Begin position
+                auto end = tmp_seq.begin() + positions[index].second; // End position
                 sequence_aa_record_type record{
                     seq_nt_set[i].id(),
                     std::vector(beg, end)};
@@ -230,8 +239,8 @@ int main(int argc, char ** argv)
             }else if (args.output_type=="NT")
             {
                 //核苷酸序列扣取范围
-                auto start_position=tmp_positions[index].first * 3 -2;  // Begin position
-                auto stop_position=tmp_positions[index].second*3; // End position
+                auto start_position=positions[index].first * 3 ;  // Begin position
+                auto stop_position=positions[index].second*3; // End position
                 if (index/3==0)
                 {
                     auto out_seq=make_vector(seq_nt_set[i].sequence()|std::views::drop(index%3));
