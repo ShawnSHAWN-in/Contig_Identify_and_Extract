@@ -10,6 +10,7 @@
 #include <fstream>
 #include <numeric>
 #include <cstring>
+#include <stdexcept>
 #include <seqan3/io/sequence_file/all.hpp>
 #include <seqan3/argument_parser/all.hpp>
 #include <seqan3/core/debug_stream.hpp>
@@ -77,7 +78,24 @@ auto make_vector(T a ){
 }
 
 
-int main(int argc, char ** argv)
+std::string normalise_sequence(char const * data, size_t length, bool amino_acid)
+{
+    std::string result;
+    result.reserve(length);
+    std::string const valid = amino_acid ? "ARNDCQEGHILKMFPSTWYVUOBJZX*" : "TVGHCDMKNYSABWR";
+    for (size_t i = 0; i < length; ++i)
+    {
+        char c = static_cast<char>(std::toupper(static_cast<unsigned char>(data[i])));
+        if (c == '-' || (amino_acid && (c == '+' || c == '.')))
+            continue;
+        result.push_back(valid.find(c) == std::string::npos ? (amino_acid ? 'X' : 'N') : c);
+    }
+    if (result.empty())
+        throw std::runtime_error{"Sequence is empty after removing gaps."};
+    return result;
+}
+
+int run(int argc, char ** argv)
 {
     using namespace seqan3::literals;
 
@@ -95,53 +113,55 @@ int main(int argc, char ** argv)
     catch (seqan3::argument_parser_error const & ext) // catch user errors
     {
         seqan3::debug_stream << "[Winter has come] " << ext.what() << "\n"; // customise your error message
-        //return -1;
+        return 1;
     }
+
+    if (args.input_type == "AA" && args.output_type == "NT")
+        throw std::invalid_argument{"AA input supports only AA output; nucleotide sequences cannot be recovered from amino acids."};
     
     using types_nt = seqan3::type_list< std::string,std::vector<seqan3::dna15>>;
     using fields_nt = seqan3::fields<seqan3::field::id,seqan3::field::seq>;
     using sequence_nt_record_type = seqan3::sequence_record<types_nt, fields_nt>;
     using seq_nt_set_t=std::vector<sequence_nt_record_type>;
     seq_nt_set_t seq_nt_set;
+    using types_aa = seqan3::type_list<std::string, std::vector<seqan3::aa27>>;
+    using fields_aa = seqan3::fields<seqan3::field::id, seqan3::field::seq>;
+    using sequence_aa_record_type = seqan3::sequence_record<types_aa, fields_aa>;
+    using seq_aa_set_t = std::vector<sequence_aa_record_type>;
+    seq_aa_set_t seq_aa_set;
     //输入的Contig核苷酸序列
     Kseq_Cpp file_input(args.file_nucleotide.generic_string(),16384);
     while (file_input.get_seq())
     {
-        std::regex tmp_reg1("-");
-        std::regex tmp_reg2("[^TVGHCDMKNYSABWR]");
-        std::string tmp_string1=std::regex_replace(file_input.seq->seq.s,tmp_reg1,"");
-        std::string tmp_string2=std::regex_replace(tmp_string1.c_str(),tmp_reg2,"N");
-        //std::cout<<tmp_string2<<"\n";
-        //用于输出比对上的氨基酸序列
-        sequence_nt_record_type record{
+        bool const amino_acid = args.input_type == "AA";
+        auto sequence = normalise_sequence(file_input.seq->seq.s, file_input.seq->seq.l, amino_acid);
+        if (amino_acid)
+            seq_aa_set.push_back(sequence_aa_record_type{
                 std::string(file_input.seq->name.s),
-                make_vector(tmp_string2|seqan3::views::char_to<seqan3::dna15> )
-                };
-        seq_nt_set.push_back(record);
+                make_vector(sequence | seqan3::views::char_to<seqan3::aa27>)});
+        else
+            seq_nt_set.push_back(sequence_nt_record_type{
+                std::string(file_input.seq->name.s),
+                make_vector(sequence | seqan3::views::char_to<seqan3::dna15>)});
     }
+    if (seq_nt_set.empty() && seq_aa_set.empty())
+        throw std::runtime_error{"Input file contains no sequences."};
 
 
-    using types_aa = seqan3::type_list< std::string,std::vector<seqan3::aa27>>;
-    using fields_aa = seqan3::fields<seqan3::field::id,seqan3::field::seq>;
-    using sequence_aa_record_type = seqan3::sequence_record<types_aa, fields_aa>;
-    using seq_aa_set_t=std::vector<sequence_aa_record_type>;
     //Conserved AA file input
     Kseq_Cpp file_conserved(args.file_amino.generic_string(),16384);
     seq_aa_set_t cd_aa_set;
     while (file_conserved.get_seq())
     {
-        //printf("qual: %s\n", file_conserved.seq->seq.s);
-        std::regex tmp_reg1("[-+.]");
-        std::regex tmp_reg2("[^ARNDCQEGHILKMFPSTWYVUOBJZX*]");
-        std::string tmp_string1=std::regex_replace(file_conserved.seq->seq.s,tmp_reg1,"");
-        std::string tmp_string2=std::regex_replace(tmp_string1.c_str(),tmp_reg2,"X");
-        //std::cout<<tmp_string2<<"\n";
+        auto sequence = normalise_sequence(file_conserved.seq->seq.s, file_conserved.seq->seq.l, true);
         sequence_aa_record_type record{
-                std::string(file_input.seq->name.s),
-                make_vector(tmp_string2|seqan3::views::char_to<seqan3::aa27>)
+                std::string(file_conserved.seq->name.s),
+                make_vector(sequence|seqan3::views::char_to<seqan3::aa27>)
                 };
         cd_aa_set.push_back(record);
     }
+    if (cd_aa_set.empty())
+        throw std::runtime_error{"Reference file contains no sequences."};
 
     auto output_config = 
         seqan3::align_cfg::output_score{} | 
@@ -164,32 +184,42 @@ int main(int argc, char ** argv)
     std::cout<<args.file_output.generic_string()<<"\n";
     seqan3::sequence_file_output fout{args.file_output.generic_string(),seqan3::fields< seqan3::field::id,seqan3::field::seq>{}};
     
-    for(size_t i = 0 ; i < seq_nt_set.size(); i++){
-        seq_aa_set_t tmp_translation(6);
-        tmp_translation[0]=sequence_aa_record_type{
-                seq_nt_set[i].id(),
-                make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame0))
-                };
-        tmp_translation[1]=sequence_aa_record_type{
-                seq_nt_set[i].id(),
-                make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame1))
-                };                
-        tmp_translation[2]=sequence_aa_record_type{
-                seq_nt_set[i].id(),
-                make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
-                };
-        tmp_translation[3]=sequence_aa_record_type{
-                seq_nt_set[i].id(),
-                make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame0))
-                };
-        tmp_translation[4]=sequence_aa_record_type{
-                seq_nt_set[i].id(),
-                make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame1))
-                };
-        tmp_translation[5]=sequence_aa_record_type{
-                seq_nt_set[i].id(),
-                make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
-                };
+    size_t const input_count = args.input_type == "AA" ? seq_aa_set.size() : seq_nt_set.size();
+    for(size_t i = 0 ; i < input_count; i++){
+        seq_aa_set_t tmp_translation;
+        auto const & input_id = args.input_type == "AA" ? seq_aa_set[i].id() : seq_nt_set[i].id();
+        if (args.input_type == "AA")
+            tmp_translation.push_back(seq_aa_set[i]);
+        else
+        {
+            if (seq_nt_set[i].sequence().size() < 3)
+                continue; // No complete codon in any frame.
+            tmp_translation.resize(6);
+            tmp_translation[0]=sequence_aa_record_type{
+                    seq_nt_set[i].id(),
+                    make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame0))
+                    };
+            tmp_translation[1]=sequence_aa_record_type{
+                    seq_nt_set[i].id(),
+                    make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame1))
+                    };
+            tmp_translation[2]=sequence_aa_record_type{
+                    seq_nt_set[i].id(),
+                    make_vector(seq_nt_set[i].sequence()|seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
+                    };
+            tmp_translation[3]=sequence_aa_record_type{
+                    seq_nt_set[i].id(),
+                    make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame0))
+                    };
+            tmp_translation[4]=sequence_aa_record_type{
+                    seq_nt_set[i].id(),
+                    make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame1))
+                    };
+            tmp_translation[5]=sequence_aa_record_type{
+                    seq_nt_set[i].id(),
+                    make_vector(seq_nt_set[i].sequence()|seqan3::views::complement | std::views::reverse|seqan3::views::translate_single(seqan3::translation_frames::forward_frame2))
+                    };
+        }
 
         std::vector<double> score;
         std::vector<std::pair<int,int>> positions;
@@ -233,7 +263,7 @@ int main(int argc, char ** argv)
                 auto beg = tmp_seq.begin() + positions[index].first;  // Begin position
                 auto end = tmp_seq.begin() + positions[index].second; // End position
                 sequence_aa_record_type record{
-                    seq_nt_set[i].id(),
+                    input_id,
                     std::vector(beg, end)};
                 fout.push_back(record);
             }else if (args.output_type=="NT")
@@ -260,5 +290,19 @@ int main(int argc, char ** argv)
                 }                
             }
         }
+    }
+    return 0;
+}
+
+int main(int argc, char ** argv)
+{
+    try
+    {
+        return run(argc, argv);
+    }
+    catch (std::exception const & error)
+    {
+        std::cerr << "IEContig: " << error.what() << '\n';
+        return 1;
     }
 }

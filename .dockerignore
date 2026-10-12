@@ -1,0 +1,10 @@
+# Include only the source and tests used by the Dockerfile.
+**
+!Dockerfile
+!.dockerignore
+!main.cpp
+!Kseq_Cpp/
+!Kseq_Cpp/*.cpp
+!Kseq_Cpp/*.h
+!tests/
+!tests/test_cli.py
