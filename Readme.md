@@ -29,7 +29,8 @@ Build from the repository root:
 docker build -t iecontig:local .
 docker run --rm iecontig:local --help
 ```
-The multi-stage build compiles with GCC/C++20 and SeqAn3 3.3.0, and runs
+The multi-stage build uses the same CMake configuration as a native build,
+automatically downloads SeqAn3 3.3.0, compiles with GCC/C++20, and runs
 the CLI regression tests. The final image contains the executable and runtime
 libraries, with no compiler or source dependencies. It runs as a non-root user.
 
@@ -59,15 +60,49 @@ mounted only during dependency download; TLS verification stays enabled.
 * Mutithreads, defalut cores > 15
 * bitvector, intensive memory storage
 * Out put nucleotide or amino acid fasta file, with rectified frame
-## Compile Limits
-> Cmake >= 3.4
-> gcc >= 10
-## Installtion
+## Build with CMake
+
+Requirements: CMake >= 3.24, Make (or Ninja), GCC >= 10 with C++20/OpenMP support, Git,
+and zlib development headers. Python 3 is needed only for regression tests.
+For example, on Debian/Ubuntu:
+```bash
+sudo apt-get update
+sudo apt-get install cmake make g++ git zlib1g-dev python3
 ```
-cmake .
-# One thread to compile. 
-make .
-# Now, IEContig you have getted.
-./IEContig
+
+Clone and build without installing SeqAn3 manually:
+```bash
+git clone https://github.com/ShawnSHAWN-in/Contig_Identify_and_Extract.git
+cd Contig_Identify_and_Extract
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 2
+./build/IEContig --help
 ```
+CMake FetchContent downloads SeqAn3 3.3.0 and its pinned SDSL/cereal
+submodules automatically into the build directory. No user-specific include
+or library paths are embedded in the project. The SeqAn3 commit is fixed for
+reproducible builds and compatibility with the argument parser used here.
+The first configuration needs GitHub access; subsequent builds reuse the
+downloaded sources. A source ZIP works too, provided Git is installed.
+
+Enable and run the regression suite:
+```bash
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --parallel 2
+ctest --test-dir build --output-on-failure -V
+```
+CTest runs the Python CLI suite (17 test methods, including six-frame checks).
+Tests are off by default so Python is not required just to compile the program.
+
+If SeqAn3 3.3.0 and its dependencies are already installed, opt into package
+discovery rather than downloading sources:
+```bash
+cmake -S . -B build-system -DIECONTIG_USE_SYSTEM_SEQAN3=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-system --parallel 2
+```
+For installations outside standard locations, use CMake's normal
+`CMAKE_PREFIX_PATH` or `seqan3_DIR` options. After a successful initial download,
+`-DFETCHCONTENT_FULLY_DISCONNECTED=ON` permits configuring again offline with
+the same build directory. Optional installation uses
+`cmake --install build --prefix <install-directory>`.
 ## future commitment

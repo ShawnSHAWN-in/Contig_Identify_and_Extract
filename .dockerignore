@@ -3,8 +3,10 @@
 !Dockerfile
 !.dockerignore
 !main.cpp
+!CMakeLists.txt
 !Kseq_Cpp/
 !Kseq_Cpp/*.cpp
 !Kseq_Cpp/*.h
+!Kseq_Cpp/CMakeLists.txt
 !tests/
 !tests/test_cli.py
